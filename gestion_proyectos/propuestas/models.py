@@ -1,5 +1,8 @@
 from django.db import models
 from django.conf import settings
+import os
+from django.core.exceptions import ValidationError
+from propuestas.utils.utils import validate_file_type, simple_unique_file_path
 
 
 class Sede(models.Model):
@@ -83,45 +86,20 @@ class Calificacion(models.Model):
         return (self.factibilidad + self.viabilidad + self.impacto) / 3
 
 
-class Prioridad(models.Model):
-    idea = models.ForeignKey(Idea, on_delete=models.CASCADE)
-    nivel_prioridad = models.IntegerField()  # Por ejemplo, una escala de 1 a 5
-    usuario_asignador = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE, null=True)
-
-    class Meta:
-        db_table = 'prioridad'
-
-    def __str__(self):
-        return f"{self.idea} - Prioridad {self.nivel_prioridad}"
-
-
-class Estadistica(models.Model):
-    idea = models.OneToOneField(Idea, on_delete=models.CASCADE)
-    vistas = models.IntegerField(default=0)
-    calificaciones_promedio = models.FloatField(default=0.0)
-    fecha_actualizacion = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = 'estadistica'
-
-    def __str__(self):
-        return f"Estadísticas de {self.idea}"
+###############################################3
 
 
 class ArchivoAdjunto(models.Model):
-    TIPO_ARCHIVO_CHOICES = [
-        ('foto', 'Foto'),
-        ('video', 'Video'),
-        ('excel', 'Excel'),
-        # Agregar otros tipos según sea necesario
-    ]
-
-    idea = models.ForeignKey(Idea, on_delete=models.CASCADE)
-    archivo = models.FileField(upload_to='archivos_ideas/')
-    tipo_archivo = models.CharField(max_length=50, choices=TIPO_ARCHIVO_CHOICES)
+    idea = models.ForeignKey(Idea, on_delete = models.CASCADE, related_name="archivos_adjuntos")
+    archivo = models.FileField(upload_to = simple_unique_file_path, validators = [validate_file_type])
+    fecha_subida = models.DateTimeField(auto_now_add = True)
 
     class Meta:
         db_table = 'archivo_adjunto'
-
+    
     def __str__(self):
-        return f"{self.tipo_archivo} de {self.idea}"
+        return os.path.basename(self.archivo.name)
+
+
+    
+###############################################

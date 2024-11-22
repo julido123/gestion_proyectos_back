@@ -2,30 +2,59 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from propuestas.models import Idea, Calificacion
-from propuestas.serializers import IdeaSerializer
+from propuestas.serializers import IdeaSerializer, IdeaWithCalificationsSerializer, IdeaSinCalificarSerializer, UpdateIdeaSerializer, UpdateCalificacionSerializer
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics
 from .filters import IdeaFilter
 from propuestas.permissions import IsAdminUserType
 from django.db.models import Count, Avg, Q
+from django.shortcuts import get_object_or_404
+import os
+from django.conf import settings
+import uuid
+from django.utils.text import slugify
 
 class IdeaCreateView(APIView):
     def post(self, request, *args, **kwargs):
-        serializer = IdeaSerializer(data=request.data)
-        
-        if serializer.is_valid():
-            serializer.save(usuario=request.user)  # Pasa el usuario autenticado directamente
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+        try:
+            print("Request data:", request.data)
+            print("Archivos recibidos:", request.FILES)
+
+            # Recuperar datos directamente
+            archivos = request.FILES.getlist('archivos[]')  # Recupera la lista de archivos subidos
+            data = {
+                'titulo': request.data.get('titulo'),
+                'descripcion': request.data.get('descripcion'),
+                'tipo': request.data.get('tipo'),
+                'sede': request.data.get('sede'),
+                'area': request.data.get('area'),
+                'archivos': archivos  # Incluye los archivos en los datos a validar
+            }
+
+            # Serializar los datos
+            serializer = IdeaSerializer(data=data, context={'request': request})
+
+            if serializer.is_valid():
+                idea = serializer.save(usuario=request.user)  # Guarda la idea
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+            print("Errores del serializer:", serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+#Ideas Ya calificadas
 class IdeaListView(generics.ListAPIView):
-    queryset = Idea.objects.all()
-    serializer_class = IdeaSerializer
+    serializer_class = IdeaWithCalificationsSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_class = IdeaFilter
-    permission_classes = [IsAdminUserType] 
+    permission_classes = [IsAdminUserType]
+
+    def get_queryset(self):
+        # Filtrar solo ideas que tienen calificaciones asociadas
+        return Idea.objects.filter(calificacion__isnull=False).distinct()
 
 
 class IdeasSinCalificarView(APIView):
@@ -36,7 +65,7 @@ class IdeasSinCalificarView(APIView):
         ideas_sin_calificar = Idea.objects.exclude(
             id__in=Calificacion.objects.filter(usuario=usuario).values_list('idea', flat=True)
         )
-        serializer = IdeaSerializer(ideas_sin_calificar, many=True)
+        serializer = IdeaSinCalificarSerializer(ideas_sin_calificar, many=True)
         return Response(serializer.data)
 
 
@@ -95,3 +124,29 @@ class DetalleEncuestasPorSedeView(APIView):
         )
         data = list(encuestas_sede)
         return Response(data)
+    
+
+class UpdateIdeaEstadoView(APIView):
+    def patch(self, request, pk):
+        
+        idea = get_object_or_404(Idea, pk=pk)
+        serializer = UpdateIdeaSerializer(idea, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UpdateCalificacionView(APIView):
+    def patch(self, request, pk):
+        
+        calificacion = get_object_or_404(Calificacion, pk=pk)
+        serializer = UpdateCalificacionSerializer(calificacion, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
