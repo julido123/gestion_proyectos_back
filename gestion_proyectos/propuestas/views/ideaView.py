@@ -7,18 +7,14 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics
 from .filters import IdeaFilter
 from propuestas.permissions import IsAdminUserType
-from django.db.models import Count, Avg, Q
+from django.db.models import Avg, Count, Q
 from django.shortcuts import get_object_or_404
-import os
-from django.conf import settings
-import uuid
-from django.utils.text import slugify
+from django.db import models
+from rest_framework.generics import GenericAPIView
 
 class IdeaCreateView(APIView):
     def post(self, request, *args, **kwargs):
         try:
-            print("Request data:", request.data)
-            print("Archivos recibidos:", request.FILES)
 
             # Recuperar datos directamente
             archivos = request.FILES.getlist('archivos[]')  # Recupera la lista de archivos subidos
@@ -53,23 +49,36 @@ class IdeaListView(generics.ListAPIView):
     permission_classes = [IsAdminUserType]
 
     def get_queryset(self):
-        # Filtrar solo ideas que tienen calificaciones asociadas
-        return Idea.objects.filter(calificacion__isnull=False).distinct()
+        # Filtrar ideas con calificaciones y ordenarlas por la puntuación general más alta
+        return Idea.objects.filter(calificacion__isnull=False).annotate(
+            max_puntuacion_general=models.Max('calificacion__puntuacion_general')
+        ).order_by('-max_puntuacion_general')
 
 
-class IdeasSinCalificarView(APIView):
+class IdeasSinCalificarView(GenericAPIView):
+    permission_classes = [IsAdminUserType]
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = IdeaFilter
 
     def get(self, request, *args, **kwargs):
         usuario = request.user
-        # Obtener ideas que no han sido calificadas por el usuario actual
+        # Obtener ideas que no han sido calificadas por el usuario actual y ordenarlas por fecha_creacion
         ideas_sin_calificar = Idea.objects.exclude(
             id__in=Calificacion.objects.filter(usuario=usuario).values_list('idea', flat=True)
-        )
+        ).order_by('-fecha_creacion')  # Ordenar por fecha_creacion descendente
+
+        # Aplicar filtros
+        ideas_sin_calificar = self.filter_queryset(ideas_sin_calificar)
+
+        # Serializar los datos
         serializer = IdeaSinCalificarSerializer(ideas_sin_calificar, many=True)
         return Response(serializer.data)
+    
+        
 
 
 class TotalIdeasPorTipoView(APIView):
+    permission_classes = [IsAdminUserType]
     def get(self, request):
         total_ideas = Idea.objects.count()
         ideas_por_tipo = Idea.objects.values('tipo').annotate(count=Count('tipo'))
@@ -82,6 +91,7 @@ class TotalIdeasPorTipoView(APIView):
     
 
 class IdeasPorAreaView(APIView):
+    permission_classes = [IsAdminUserType]
     def get(self, request):
         ideas_area = Idea.objects.values('area__nombre', 'tipo').annotate(count=Count('id'))
         data = {}
@@ -96,6 +106,7 @@ class IdeasPorAreaView(APIView):
     
 
 class IdeasPorSedeView(APIView):
+    permission_classes = [IsAdminUserType]
     def get(self, request):
         ideas_sede = Idea.objects.values('sede__nombre', 'tipo').annotate(count=Count('id'))
         data = {}
@@ -110,6 +121,8 @@ class IdeasPorSedeView(APIView):
     
 
 class DetalleEncuestasPorSedeView(APIView):
+    permission_classes = [IsAdminUserType]
+
     def get(self, request):
         encuestas_sede = (
             Idea.objects
@@ -122,11 +135,22 @@ class DetalleEncuestasPorSedeView(APIView):
                 promedio_calificacion=Avg('calificacion__puntuacion_general')
             )
         )
-        data = list(encuestas_sede)
+
+        # Redondear después de obtener los datos
+        data = [
+            {
+                **item,
+                'promedio_calificacion': round(item['promedio_calificacion'], 1)
+                if item['promedio_calificacion'] is not None else None
+            }
+            for item in encuestas_sede
+        ]
+
         return Response(data)
     
 
 class UpdateIdeaEstadoView(APIView):
+    permission_classes = [IsAdminUserType]
     def patch(self, request, pk):
         
         idea = get_object_or_404(Idea, pk=pk)
@@ -140,6 +164,7 @@ class UpdateIdeaEstadoView(APIView):
 
 
 class UpdateCalificacionView(APIView):
+    permission_classes = [IsAdminUserType]
     def patch(self, request, pk):
         
         calificacion = get_object_or_404(Calificacion, pk=pk)

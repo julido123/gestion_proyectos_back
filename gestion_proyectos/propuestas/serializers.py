@@ -14,9 +14,12 @@ class ArchivoAdjuntoSerializer(serializers.ModelSerializer):
         fields = ['id', 'archivo_url']
 
     def get_archivo_url(self, obj):
-        # Genera la URL completa del archivo
-        request = self.context.get('request')
-        return request.build_absolute_uri(obj.archivo.url) if request else obj.archivo.url
+        # Obtiene la URL completa del archivo
+        url = obj.archivo.url
+        # Reemplaza '/media/' con una cadena vacía, dejando solo la ruta relativa desde 'uploads/'
+        if url.startswith('/media/'):
+            return url.replace('/media/', '')
+        return url
 
 
 class IdeaSerializer(serializers.ModelSerializer):
@@ -71,10 +74,22 @@ class IdeaSinCalificarSerializer(serializers.ModelSerializer):
     sede = serializers.CharField(source='sede.nombre')
     area = serializers.CharField(source='area.nombre')
     archivos = ArchivoAdjuntoSerializer(source='archivos_adjuntos', many=True)
-
+    tipo = serializers.SerializerMethodField()    
+    
     class Meta:
         model = Idea
-        fields = ['id', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'estado', 'archivos']
+        fields = ['id', 'fecha_creacion', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'archivos']
+
+    def get_tipo(self, obj):
+        return obj.get_tipo_display()
+
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        # Formatear la fecha
+        if instance.fecha_creacion:
+            representation['fecha_creacion'] = instance.fecha_creacion.strftime('%d/%m/%Y')
+        return representation
     
 
     
@@ -112,11 +127,23 @@ class IdeaWithCalificationsSerializer(serializers.ModelSerializer):
     area = serializers.CharField()
     calificaciones = CalificacionSerializer2(many=True, source='calificacion_set')
     fecha_creacion = serializers.SerializerMethodField()
+    estado = serializers.SerializerMethodField()  # Cambiamos a SerializerMethodField para personalizar
+    tipo = serializers.SerializerMethodField()
+    archivos = ArchivoAdjuntoSerializer(source='archivos_adjuntos', many=True)
 
     class Meta:
         model = Idea
-        fields = ['id', 'fecha_creacion', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'estado', 'calificaciones']
+        fields = ['id', 'fecha_creacion', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'estado', 'calificaciones', 'archivos']
         read_only_fields = ['usuario']
+        
+    def get_estado(self, obj):
+        # Usamos el método get_estado_display() para obtener el texto legible del estado
+        return obj.get_estado_display()
+    
+    def get_tipo(self, obj):
+        # Usamos el método get_estado_display() para obtener el texto legible del estado
+        return obj.get_tipo_display()
+
 
     def get_fecha_creacion(self, obj):
         # Formatea la fecha en día/mes/año

@@ -4,6 +4,8 @@ from propuestas.views.calificarView import CalificacionCreateView
 from propuestas.views.rankingView import UserRankingView
 from propuestas.views.sedeView import SedeListView
 from propuestas.views.areaView import AreaListView
+from propuestas.views.archivosView import ObtenerImagenView
+from propuestas.views.userProfileView import UserProfileView
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -26,6 +28,10 @@ urlpatterns = [
     
     path('ideas/<int:pk>/estado/', UpdateIdeaEstadoView.as_view(), name='update-idea-estado'),
     path('calificaciones/<int:pk>/', UpdateCalificacionView.as_view(), name='update-calificacion'),
+    
+    path('media/<path:ruta>/', ObtenerImagenView.as_view(), name='obtener_archivo'),
+    
+    path('perfil/', UserProfileView.as_view(), name='user-profile'),
     
     
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
