@@ -12,13 +12,20 @@ class UserProfileView(APIView):
     def get(self, request):
         # Extraer el usuario autenticado desde el token
         user = request.user
-        
+
         # Datos básicos del usuario
         nombre = user.nombre
         username = user.username
         apellido = user.apellido
         cedula = user.cedula
-        user_type = user.user_type
+
+        # Determinar el tipo de usuario o área encargada
+        if hasattr(user, 'area_encargada') and user.area_encargada:
+            user_type = f"Encargado {user.area_encargada.nombre}"
+        elif user.es_gerente:
+            user_type = "Gerente"
+        else:
+            user_type = user.user_type
 
         # Contar la cantidad de ideas creadas por el usuario
         cantidad_ideas = Idea.objects.filter(usuario=user).count()

@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Idea, Sede, Area, Calificacion, ArchivoAdjunto
 from django.contrib.auth import get_user_model
 from accounts.models import Account
+from propuestas.services.idea_service import calcular_calificacion_definitiva 
 
 
 User = get_user_model()
@@ -24,18 +25,20 @@ class ArchivoAdjuntoSerializer(serializers.ModelSerializer):
 
 class IdeaSerializer(serializers.ModelSerializer):
     usuario = serializers.ReadOnlyField(source='usuario.username')
-    sede = serializers.CharField()
-    area = serializers.CharField()
+    sede = serializers.PrimaryKeyRelatedField(queryset=Sede.objects.all())
+    area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all())
     archivos = serializers.ListField(
         child=serializers.FileField(),
         write_only=True,
         required=False
     )
 
+
     class Meta:
         model = Idea
-        fields = ['id', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'estado', 'archivos']
+        fields = ['id', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'archivos']
         read_only_fields = ['fecha_creacion', 'usuario']
+
 
     def validate_sede(self, value):
         try:
@@ -74,14 +77,18 @@ class IdeaSinCalificarSerializer(serializers.ModelSerializer):
     sede = serializers.CharField(source='sede.nombre')
     area = serializers.CharField(source='area.nombre')
     archivos = ArchivoAdjuntoSerializer(source='archivos_adjuntos', many=True)
-    tipo = serializers.SerializerMethodField()    
+    tipo = serializers.SerializerMethodField()
+    estado_revision = serializers.SerializerMethodField()
     
     class Meta:
         model = Idea
-        fields = ['id', 'fecha_creacion', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'archivos']
+        fields = ['id', 'fecha_creacion', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'archivos', 'estado_revision']
 
     def get_tipo(self, obj):
         return obj.get_tipo_display()
+
+    def get_estado_revision(self, obj):
+        return obj.get_estado_revision_display()
 
 
     def to_representation(self, instance):
@@ -122,44 +129,83 @@ class CalificacionSerializer2(serializers.ModelSerializer):
 
 
 class IdeaWithCalificationsSerializer(serializers.ModelSerializer):
-    usuario = serializers.ReadOnlyField(source='usuario.username')  # Solo lectura
+    usuario = serializers.ReadOnlyField(source='usuario.username')
     sede = serializers.CharField()
     area = serializers.CharField()
-    calificaciones = CalificacionSerializer2(many=True, source='calificacion_set')
+    calificaciones = serializers.SerializerMethodField()  # Personalizamos las calificaciones
     fecha_creacion = serializers.SerializerMethodField()
-    estado = serializers.SerializerMethodField()  # Cambiamos a SerializerMethodField para personalizar
+    estado_ejecucion = serializers.SerializerMethodField()
+    estado_revision = serializers.SerializerMethodField()
     tipo = serializers.SerializerMethodField()
     archivos = ArchivoAdjuntoSerializer(source='archivos_adjuntos', many=True)
 
     class Meta:
         model = Idea
-        fields = ['id', 'fecha_creacion', 'usuario', 'titulo', 'descripcion', 'tipo', 'sede', 'area', 'estado', 'calificaciones', 'archivos']
+        fields = [
+            'id', 'fecha_creacion', 'usuario', 'titulo', 'descripcion', 'tipo',
+            'sede', 'area', 'estado_ejecucion', 'estado_revision', 'calificaciones', 'archivos'
+        ]
         read_only_fields = ['usuario']
-        
-    def get_estado(self, obj):
-        # Usamos el método get_estado_display() para obtener el texto legible del estado
-        return obj.get_estado_display()
-    
-    def get_tipo(self, obj):
-        # Usamos el método get_estado_display() para obtener el texto legible del estado
-        return obj.get_tipo_display()
 
+    def get_calificaciones(self, obj):
+        """Incluye las calificaciones del encargado, gerente y definitiva, ordenadas según el tipo de usuario."""
+        calificaciones = Calificacion.objects.filter(idea=obj)
+        encargado_calificacion = calificaciones.filter(tipo_calificacion='encargado').first()
+        gerente_calificacion = calificaciones.filter(tipo_calificacion='gerente').first()
+
+        # Formato para las calificaciones existentes
+        calificaciones_list = []
+        if encargado_calificacion:
+            calificaciones_list.append({
+                "tipo": "encargado",
+                **CalificacionSerializer2(encargado_calificacion).data
+            })
+        if gerente_calificacion:
+            calificaciones_list.append({
+                "tipo": "gerente",
+                **CalificacionSerializer2(gerente_calificacion).data
+            })
+
+        # Agregar la calificación definitiva
+        definitiva = calcular_calificacion_definitiva(obj)
+        if definitiva:
+            calificaciones_list.append({
+                "tipo": "definitiva",
+                # "factibilidad": definitiva["promedio_factibilidad"],
+                # "viabilidad": definitiva["promedio_viabilidad"],
+                # "impacto": definitiva["promedio_impacto"],
+                "puntuacion_general": definitiva["promedio_general"],
+                "comentario": None  # No aplica comentario para la calificación definitiva
+            })
+
+        # Obtener el usuario que realiza la solicitud
+        request = self.context.get('request')
+        if request:
+            user = request.user
+
+            # Caso 1: Usuario es encargado
+            if hasattr(user, 'area_encargada') and user.area_encargada:
+                calificaciones_list.sort(key=lambda x: 0 if x['tipo'] == 'encargado' else 1)
+
+            # Caso 2: Usuario es gerente
+            elif getattr(user, 'es_gerente', False):
+                calificaciones_list.sort(key=lambda x: 0 if x['tipo'] == 'gerente' else 1)
+
+            # Caso 3: Otros usuarios (no modificar el orden)
+        
+        return calificaciones_list
 
     def get_fecha_creacion(self, obj):
-        # Formatea la fecha en día/mes/año
         return obj.fecha_creacion.strftime('%d/%m/%Y')
 
-    def validate_sede(self, value):
-        try:
-            return Sede.objects.get(nombre=value)
-        except Sede.DoesNotExist:
-            raise serializers.ValidationError("Sede no encontrada")
+    def get_estado_ejecucion(self, obj):
+        return obj.get_estado_ejecucion_display()
 
-    def validate_area(self, value):
-        try:
-            return Area.objects.get(nombre=value)
-        except Area.DoesNotExist:
-            raise serializers.ValidationError("Área no encontrada")
+    def get_estado_revision(self, obj):
+        return obj.get_estado_revision_display()
+
+    def get_tipo(self, obj):
+        return obj.get_tipo_display()
 
 ###################################3
 
@@ -192,7 +238,7 @@ class AreaSerializer(serializers.ModelSerializer):
 class UpdateIdeaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Idea
-        fields = ['estado']  # Permitir solo la actualización del estado
+        fields = ['estado_ejecucion']  # Permitir solo la actualización del estado
 
 class UpdateCalificacionSerializer(serializers.ModelSerializer):
     class Meta:

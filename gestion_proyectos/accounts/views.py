@@ -26,12 +26,18 @@ def login_view(request):
 
         # Autenticar la contraseña del usuario
         account = auth.authenticate(username=username, password=password)
+        # if hasattr(user, 'area_encargada') and user.area_encargada:
+        #     user_type = f"Encargado {user.area_encargada.nombre}"
+        # elif user.es_gerente:
+        #     user_type = "Gerente"
+            
         if account is not None:
-            data['response'] = 'El login fue exitoso'
             data['username'] = account.username
             data['email'] = account.email
-            data['nombre'] = account.nombre  # Agregado
-            data['apellido'] = account.apellido  # Agregado
+            data['nombre'] = account.nombre  
+            data['apellido'] = account.apellido
+            data['gerente'] = account.es_gerente
+            data['area_encargada'] = account.area_encargada.nombre if account.area_encargada else None
             data['user_type'] = account.user_type
             refresh = RefreshToken.for_user(account)
             data['token'] = {

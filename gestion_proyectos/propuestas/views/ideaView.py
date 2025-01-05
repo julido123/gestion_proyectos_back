@@ -41,7 +41,7 @@ class IdeaCreateView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-#Ideas Ya calificadas
+# Ideas Ya calificadas
 class IdeaListView(generics.ListAPIView):
     serializer_class = IdeaWithCalificationsSerializer
     filter_backends = [DjangoFilterBackend]
@@ -49,11 +49,36 @@ class IdeaListView(generics.ListAPIView):
     permission_classes = [IsAdminUserType]
 
     def get_queryset(self):
-        # Filtrar ideas con calificaciones y ordenarlas por la puntuación general más alta
-        return Idea.objects.filter(calificacion__isnull=False).annotate(
-            max_puntuacion_general=models.Max('calificacion__puntuacion_general')
-        ).order_by('-max_puntuacion_general')
+        usuario = self.request.user
 
+        # Caso 1: Usuario es encargado
+        if hasattr(usuario, 'area_encargada') and usuario.area_encargada:
+            return Idea.objects.filter(
+                area=usuario.area_encargada,
+                calificacion__isnull=False
+            ).distinct().annotate(
+                max_puntuacion_general=models.Max('calificacion__puntuacion_general')
+            ).order_by('-max_puntuacion_general')
+
+        # Caso 2: Usuario es gerente
+        elif usuario.es_gerente:
+            # Filtrar las ideas calificadas por el gerente
+            return Idea.objects.filter(
+                calificacion__usuario=usuario,
+                calificacion__tipo_calificacion='gerente'
+            ).distinct().annotate(
+                max_puntuacion_general=models.Max('calificacion__puntuacion_general')
+            ).order_by('-max_puntuacion_general')
+
+        # Caso 3: Usuario es admin (con control total)
+        else:
+            return Idea.objects.filter(
+                calificacion__isnull=False
+            ).distinct().annotate(
+                max_puntuacion_general=models.Max('calificacion__puntuacion_general')
+            ).order_by('-max_puntuacion_general')
+            
+            
 
 class IdeasSinCalificarView(GenericAPIView):
     permission_classes = [IsAdminUserType]
@@ -62,12 +87,27 @@ class IdeasSinCalificarView(GenericAPIView):
 
     def get(self, request, *args, **kwargs):
         usuario = request.user
-        # Obtener ideas que no han sido calificadas por el usuario actual y ordenarlas por fecha_creacion
+
+        # Obtener ideas que no han sido calificadas por el usuario actual
         ideas_sin_calificar = Idea.objects.exclude(
             id__in=Calificacion.objects.filter(usuario=usuario).values_list('idea', flat=True)
         ).order_by('-fecha_creacion')  # Ordenar por fecha_creacion descendente
 
-        # Aplicar filtros
+        # Si el usuario es encargado de un área, filtrar ideas de su área y que no hayan sido revisadas por él
+        if hasattr(usuario, 'area_encargada') and usuario.area_encargada:
+            ideas_sin_calificar = ideas_sin_calificar.filter(
+                area=usuario.area_encargada,
+                revisada_por_encargado=False
+            )
+
+        # Si el usuario es gerente, filtrar ideas revisadas por encargados pero no por gerentes
+        elif usuario.es_gerente:  # Supongamos que tienes esta propiedad en tu modelo de usuario
+            ideas_sin_calificar = ideas_sin_calificar.filter(
+                revisada_por_encargado=True,
+                revisada_por_gerente=False
+            )
+
+        # Aplicar filtros adicionales desde la clase de filtros
         ideas_sin_calificar = self.filter_queryset(ideas_sin_calificar)
 
         # Serializar los datos

@@ -27,28 +27,55 @@ class Area(models.Model):
 
 
 class Idea(models.Model):
-    TIPO_CHOICES = [
-        ('problema', 'Problema'),
-        ('oportunidad', 'Oportunidad'),
-        ('reto', 'Reto'),
-        # Agregar otros tipos según sea necesario
+    # Opciones para los estados de revisión y ejecución
+    ESTADO_REVISION_CHOICES = [
+        ('por_revisar', 'Por Revisar'),
+        ('revisada_parcialmente', 'Revisada Parcialmente'),
+        ('denegada', 'Denegada'),
+        ('en_evaluacion_final', 'En Evaluación Final'),
+        ('aprobada', 'Aprobada'),
     ]
 
-    ESTADO_CHOICES = [
-        ('pendiente', 'Pendiente'),
-        ('aprobada', 'Aprobada'),
-        ('en_progreso', 'En Progreso'),
+    ESTADO_EJECUCION_CHOICES = [
+        ('pendiente_ejecucion', 'Pendiente de Ejecución'),
+        ('en_ejecucion', 'En Ejecución'),
         ('completada', 'Completada'),
     ]
 
+    # Campos principales
     titulo = models.CharField(max_length=200)
     descripcion = models.TextField()
-    usuario = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE, null=True)
-    tipo = models.CharField(max_length=50, choices=TIPO_CHOICES)
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True
+    )
+    tipo = models.CharField(max_length=50, choices=[
+        ('problema', 'Problema'),
+        ('oportunidad', 'Oportunidad'),
+        ('reto', 'Reto'),
+    ])
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     sede = models.ForeignKey(Sede, on_delete=models.SET_NULL, null=True)
     area = models.ForeignKey(Area, on_delete=models.SET_NULL, null=True)
-    estado = models.CharField(max_length=50, choices=ESTADO_CHOICES, default='pendiente')
+
+    # Estados
+    estado_revision = models.CharField(
+        max_length=50,
+        choices=ESTADO_REVISION_CHOICES,
+        default='por_revisar'
+    )
+    estado_ejecucion = models.CharField(
+        max_length=50,
+        choices=ESTADO_EJECUCION_CHOICES,
+        null=True,
+        blank=True
+    )
+
+    # Indicadores de revisión
+    revisada_por_encargado = models.BooleanField(default=False)
+    revisada_por_gerente = models.BooleanField(default=False)
+    
 
     class Meta:
         db_table = 'idea'
@@ -57,20 +84,26 @@ class Idea(models.Model):
         return self.titulo
 
 
+
 class Calificacion(models.Model):
     idea = models.ForeignKey(Idea, on_delete=models.CASCADE)
     usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
-    
-    # Puntuación general dada por el gerente u otra figura de liderazgo
-    puntuacion_general = models.IntegerField(null=True)  # Escala de 1 a 10
-    
-    # Calificaciones específicas
-    factibilidad = models.IntegerField(null=True)  # Escala de 1 a 10
-    viabilidad = models.IntegerField(null=True)    # Escala de 1 a 10
-    impacto = models.IntegerField(null=True)       # Escala de 1 a 10
 
-    # Comentario adicional
+    # Calificaciones específicas
+    puntuacion_general = models.IntegerField(null=True, blank=True)  # Escala de 1 a 10
+    factibilidad = models.IntegerField(null=True, blank=True)  # Escala de 1 a 10
+    viabilidad = models.IntegerField(null=True, blank=True)    # Escala de 1 a 10
+    impacto = models.IntegerField(null=True, blank=True)       # Escala de 1 a 10
+
+    # Comentarios adicionales
     comentario = models.TextField(blank=True, null=True)
+
+    # Tipo de calificación
+    TIPO_CALIFICACION_CHOICES = [
+        ('encargado', 'Encargado'),
+        ('gerente', 'Gerente'),
+    ]
+    tipo_calificacion = models.CharField(max_length=20, choices=TIPO_CALIFICACION_CHOICES)
 
     class Meta:
         db_table = 'calificacion'
@@ -78,12 +111,6 @@ class Calificacion(models.Model):
 
     def __str__(self):
         return f"{self.usuario} - {self.idea} - General: {self.puntuacion_general}"
-
-    def promedio(self):
-        """
-        Calcula el promedio de las calificaciones específicas (factibilidad, viabilidad, impacto)
-        """
-        return (self.factibilidad + self.viabilidad + self.impacto) / 3
 
 
 ###############################################3

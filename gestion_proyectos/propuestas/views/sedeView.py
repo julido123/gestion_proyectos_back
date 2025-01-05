@@ -5,7 +5,6 @@ from propuestas.permissions import IsAdminUserType
 
 
 class SedeListView(generics.ListAPIView):
-    permission_classes = [IsAdminUserType]
     queryset = Sede.objects.all()
     serializer_class = SedeSerializer
 

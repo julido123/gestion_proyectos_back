@@ -3,15 +3,15 @@ from rest_framework.response import Response
 from rest_framework import status
 from propuestas.models import Calificacion, Idea
 from propuestas.serializers import CalificacionSerializer
-from accounts.models import Account
 from propuestas.permissions import IsAdminUserType
+from propuestas.services.idea_service import actualizar_estado_ejecucion, actualizar_estado_revision
 
 class CalificacionCreateView(APIView):
-    permission_classes = [IsAdminUserType] 
+    permission_classes = [IsAdminUserType]
 
     def post(self, request, *args, **kwargs):
         try:
-            # Obtener datos directamente del JSON, excepto el usuario
+            # Obtener datos del JSON
             idea_id = request.data.get('idea')
             factibilidad = request.data.get('factibilidad')
             viabilidad = request.data.get('viabilidad')
@@ -25,6 +25,25 @@ class CalificacionCreateView(APIView):
             # Obtener el usuario autenticado desde el token
             usuario = request.user
 
+            # Determinar el tipo de calificación según el rol del usuario
+            if hasattr(usuario, 'area_encargada') and usuario.area_encargada:
+                if idea.area != usuario.area_encargada:
+                    return Response(
+                        {"error": "No tienes permiso para calificar ideas de esta área"},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+                tipo_calificacion = 'encargado'
+                idea.revisada_por_encargado = True
+
+            elif usuario.es_gerente:
+                tipo_calificacion = 'gerente'
+                idea.revisada_por_gerente = True
+            else:
+                return Response(
+                    {"error": "No tienes el rol adecuado para calificar esta idea"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
             # Crear la calificación
             calificacion = Calificacion.objects.create(
                 idea=idea,
@@ -33,15 +52,22 @@ class CalificacionCreateView(APIView):
                 viabilidad=int(viabilidad),
                 impacto=int(impacto),
                 comentario=comentario,
-                puntuacion_general=puntuacion_general
+                puntuacion_general=puntuacion_general,
+                tipo_calificacion=tipo_calificacion
             )
 
-            # Cambiar el estado de la idea a 'en_progreso'
-            idea.estado = 'en_progreso'
-            idea.save()  # Guarda los cambios en la base de datos
+            # Actualizar estados de la idea
+            actualizar_estado_revision(idea)
+
+            # Si la idea está aprobada, establecer el estado de ejecución predeterminado
+            
 
             # Serializar la calificación y devolver la respuesta
             serializer = CalificacionSerializer(calificacion)
+            
+            print(idea.estado_revision, "++++--")
+            if idea.estado_revision == 'aprobada':
+                actualizar_estado_ejecucion(idea, 'pendiente_ejecucion')
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Idea.DoesNotExist:
